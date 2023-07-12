@@ -23,11 +23,6 @@ from cryptoApiApp.views import CryptoAddressViewSet
 router = DefaultRouter()
 router.register(r'addresses', CryptoAddressViewSet, basename='crypto-address')
 
-
-
 urlpatterns = [
     path('', include(router.urls)),
 ]
-
-
-
