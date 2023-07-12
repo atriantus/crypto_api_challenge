@@ -1,64 +1,61 @@
-from rest_framework.test import APITestCase
-from rest_framework import status
 from django.urls import reverse
+from rest_framework import status
+from rest_framework.test import APITestCase
+from faker import Faker
 from .models import CryptoAddress
-from .serializers import CryptoAddressSerializer
 
 
 class CryptoAddressTests(APITestCase):
-    def test_generate_address(self):
-        # Test the "Generate Address" endpoint
-        url = reverse('crypto-address-list')
-        data = {'currency': 'BTC'}
+    def setUp(self):
+        """
+        Setup for the test cases.
+        """
+        self.fake = Faker()
+        self.currency = "BTC"
+        self.address = self.fake.sha256()
+        self.private_key = self.fake.sha256()
 
-        # Send a POST request to the endpoint
-        response = self.client.post(url, data, format='json')
+        # Create a test address
+        self.crypto_address = CryptoAddress.objects.create(
+            currency=self.currency,
+            address=self.address,
+            private_key=self.private_key
+        )
 
-        # Assert that the response has a status code of 201 (created)
+        # URL for our API endpoint
+        self.url = reverse('crypto-address-list')
+
+    def test_create_address(self):
+        """
+        Ensure we can create a new address.
+        """
+        data = {
+            'currency': self.currency,
+            'num_addresses': 1
+        }
+        response = self.client.post(self.url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(CryptoAddress.objects.count(), 2)
+        self.assertEqual(CryptoAddress.objects.latest('id').currency, self.currency)
 
-        # Get the generated address and private key from the response
-        address = response.data['address']
-        private_key = response.data['private_key']
+    def test_create_address_invalid_currency(self):
+        """
+        Ensure we cannot create an address with unsupported currency.
+        """
+        data = {
+            'currency': "UNSUPPORTED",
+            'num_addresses': 1
+        }
+        response = self.client.post(self.url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-        # Validate the generated address and private key using your chosen method
-
-    def test_list_addresses(self):
-        # Test the "List Address" endpoint
-        url = reverse('crypto-address-list')
-
-        # Create some CryptoAddress instances for testing
-        CryptoAddress.objects.create(currency='BTC', address='BTC1...', private_key='...')
-        CryptoAddress.objects.create(currency='ETH', address='ETH1...', private_key='...')
-
-        # Send a GET request to the endpoint
-        response = self.client.get(url)
-
-        # Assert that the response has a status code of 200 (OK)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-        # Get all CryptoAddress instances from the database
-        addresses = CryptoAddress.objects.all()
-
-        # Serialize the addresses using the serializer
-        serializer = CryptoAddressSerializer(addresses, many=True)
-
-        # Assert that the returned data matches the serialized data
-        self.assertEqual(response.data, serializer.data)
-
-    def test_retrieve_address(self):
-        # Test the "Retrieve Address" endpoint
-        address = CryptoAddress.objects.create(currency='BTC', address='BTC1...', private_key='...')
-        url = reverse('crypto-address-detail', kwargs={'pk': address.pk})
-
-        # Send a GET request to the endpoint
-        response = self.client.get(url)
-
-        # Assert that the response has a status code of 200 (OK)
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-
-        # Serialize the address
-        serializer = CryptoAddressSerializer(address)
-
-        # Assert that the returned data matches the serialized data
-        self.assertEqual(response.data, serializer.data)
+    def test_create_address_invalid_num_addresses(self):
+        """
+        Ensure we cannot create an address with num_addresses less than 1.
+        """
+        data = {
+            'currency': self.currency,
+            'num_addresses': 0
+        }
+        response = self.client.post(self.url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

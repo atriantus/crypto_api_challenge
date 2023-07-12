@@ -1,70 +1,60 @@
 from django.shortcuts import render
 from rest_framework import viewsets
 from rest_framework.response import Response
-import bitcoinlib.wallets as bw
-from eth_account import Account
+from hdwallet import BIP44HDWallet
+from hdwallet.utils import generate_mnemonic
 from .models import CryptoAddress
 from .serializers import CryptoAddressSerializer
 
-# from hdwallet import HDWallet
-# from hdwallet.utils import generate_entropy
-# from hdwallet.symbols import DOGE as SYMBOL
+# Define constants for coin types for clarity and easy changes in future
+COIN_TYPES = {
+    "BTC": 0,
+    "ETH": 60,
+    "DOGE": 3,
+    "LTC": 2,
+    "TRX": 195
+    # Can add all the coins hdwallet supports found at: https://hdwallet.readthedocs.io/en/v2.2.1/cryptocurrencies.html
+}
 
 
-# ViewSet for handling the API endpoints
 class CryptoAddressViewSet(viewsets.ModelViewSet):
-
-    # Define the queryset and the serializer
     queryset = CryptoAddress.objects.all()
     serializer_class = CryptoAddressSerializer
 
-
-    # Overriding the create() method for custom address generation
     def create(self, request, *args, **kwargs):
-        # Fetch the 'currency' from request data
         currency = request.data.get('currency')
+        num_addresses = int(request.data.get('num_addresses', 1))
 
-        # Function for generating a Bitcoin address
-        def generate_btc_address():
-            # Create a new Wallet or open the existing one if same name
-            w = bw.wallet_create_or_open('test_wallet')
-            # Get an address from the wallet
-            address = w.get_key().address
-            # Get the private key from the wallet
-            private_key = w.get_key().wif
-            return address, private_key
+        if not self._is_valid_request(currency, num_addresses):
+            return Response({'error': 'Unsupported currency or invalid number of addresses'}, status=400)
 
-        # Function for generating an Ethereum address
-        def generate_eth_address():
-            # Create a new Ethereum account
-            account = Account.create()
-            # Get the address of the account
-            address = account.address
-            # Get the private key of the account
-            private_key_hex = account.key
-            private_key = private_key_hex.hex()
-            return address, private_key
+        addresses = self._generate_addresses(currency, num_addresses)
+        serializer = self.get_serializer(addresses, many=True)
+        return Response(serializer.data, status=201)
 
-        # Mapping the currencies to their respective address generation functions
-        address_generators = {
-            'BTC': generate_btc_address,
-            'ETH': generate_eth_address,
-        }
+    def _is_valid_request(self, currency, num_addresses):
+        """
+        Checks if the request is valid. i.e., currency is supported and num_addresses is >=1.
+        """
+        return currency in COIN_TYPES and num_addresses >= 1
 
-        # Check if the currency is supported
-        if currency not in address_generators:
-            return Response({'error': 'Unsupported currency'}, status=400)
-
-        # Generate the address and the private key
-        address, private_key = address_generators[currency]()
-
-        # Create a new CryptoAddress instance and save it to the database
-        crypto_address = CryptoAddress.objects.create(
-            currency=currency,
-            address=address,
-            private_key=private_key
-        )
-
-        # Serialize the created CryptoAddress instance
-        serializer = self.get_serializer(crypto_address)
-        return Response(serializer.data, status=201) # Return the serialized data
+    def _generate_addresses(self, currency, num_addresses):
+        """
+        Generates the requested number of addresses for the specified currency.
+        """
+        coin_type = COIN_TYPES[currency]
+        mnemonic = generate_mnemonic(language="english")
+        wallet = BIP44HDWallet(symbol=currency)
+        wallet.from_mnemonic(mnemonic=mnemonic)
+        addresses = []
+        for i in range(num_addresses):
+            wallet.clean_derivation()
+            wallet.from_path(path=f"m/44'/{coin_type}'/0'/0/{i}")
+            addresses.append(
+                CryptoAddress.objects.create(
+                    currency=currency,
+                    address=wallet.address(),
+                    private_key=wallet.private_key()
+                )
+            )
+        return addresses
